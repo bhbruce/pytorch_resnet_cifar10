@@ -2,7 +2,7 @@ import argparse
 import os
 import shutil
 import time
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -21,16 +21,18 @@ model_names = sorted(name for name in resnet.__dict__
 print(model_names)
 
 parser = argparse.ArgumentParser(description='Propert ResNets for CIFAR10 in pytorch')
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet32',
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) +
-                    ' (default: resnet32)')
+                    ' (default: resnet20)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
+parser.add_argument('--seed', default=1, type=int,
+                    metavar='N', help='seed (default: 1)')
 parser.add_argument('-b', '--batch-size', default=128, type=int,
                     metavar='N', help='mini-batch size (default: 128)')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
@@ -39,8 +41,8 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
-parser.add_argument('--print-freq', '-p', default=50, type=int,
-                    metavar='N', help='print frequency (default: 50)')
+parser.add_argument('--print-freq', '-p', default=100, type=int,
+                    metavar='N', help='print frequency (default: 100)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
@@ -61,8 +63,10 @@ best_prec1 = 0
 def main():
     global args, best_prec1
     args = parser.parse_args()
-
-
+    # Fixed seed
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    cudnn.deterministic = True
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
@@ -83,7 +87,7 @@ def main():
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
-    cudnn.benchmark = True
+    #cudnn.benchmark = True
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -130,11 +134,12 @@ def main():
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
-
+    best_epoch = args.start_epoch
     for epoch in range(args.start_epoch, args.epochs):
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
+        print(f'Best accuracy {best_prec1} at {best_epoch}')
         train(train_loader, model, criterion, optimizer, epoch)
         lr_scheduler.step()
 
@@ -143,7 +148,9 @@ def main():
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
-        best_prec1 = max(prec1, best_prec1)
+        if is_best:
+            best_prec1 = prec1
+            best_epoch = epoch
 
         if epoch > 0 and epoch % args.save_every == 0:
             save_checkpoint({
@@ -153,6 +160,7 @@ def main():
             }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
 
         save_checkpoint({
+            'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
